@@ -38,6 +38,7 @@ ani-down naruto -e all --dry-run      # show what would be saved
 | `--overwrite` | redo files that already exist (otherwise they are skipped) |
 | `--no-subs` | do not add subtitles |
 | `--dry-run` | list what would be downloaded |
+| `-D, --discord` | open the Discord server |
 | `--upgrade` | update to the latest version from GitHub |
 
 Files go to `FOLDER/Title/Title - 01.mkv`. A half-finished download ends in `.part`.
@@ -49,6 +50,10 @@ Files go to `FOLDER/Title/Title - 01.mkv`. A half-finished download ends in `.pa
 - **`./install.sh` not executable**: run it with `bash install.sh`.
 
 Environment variables (optional): `PAHE_URL`, `PAHE_COOKIE`, `HIANIME_URL`.
+
+## Community
+
+Questions, bug reports or just want to hang out? Join the Discord: https://discord.gg/U953H5hmPG (or run `ani-down --discord`).
 
 ## Credits and license
 

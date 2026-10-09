@@ -9,6 +9,7 @@ import sys
 import tempfile
 import threading
 import time
+import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,7 +20,7 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn
 from rich.table import Table
 from rich.text import Text
 
-from . import __version__
+from . import DISCORD, __version__
 from .core import clean_title, ep_num, get_stream, search_providers
 from .providers import PROVIDERS
 from .ui import Prompt, console, error, pick
@@ -63,7 +64,7 @@ def build_parser():
     ap = argparse.ArgumentParser(
         prog="ani-down", add_help=False, description="Download anime episodes from your terminal.",
         epilog="examples:\n  ani-down naruto\n  ani-down naruto -e 1-12 -j 3\n  ani-down naruto -e 5 -n 4        (episodes 5 to 8)\n"
-               "  ani-down naruto -e latest -f mp4 -q 720 -o ~/anime\n  ani-down naruto -e all --dry-run",
+               "  ani-down naruto -e latest -f mp4 -q 720 -o ~/anime\n  ani-down naruto -e all --dry-run\n\ncommunity: " + DISCORD,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("query", nargs="*", help="search query")
     ap.add_argument("-p", "--provider", choices=PROVIDERS, default="hianime")
@@ -80,6 +81,7 @@ def build_parser():
     ap.add_argument("--no-subs", action="store_true", help="do not add subtitles")
     ap.add_argument("--debug", action="store_true", help="show ffmpeg commands and full errors")
     ap.add_argument("--dry-run", action="store_true", help="only list what would be downloaded")
+    ap.add_argument("-D", "--discord", action="store_true", help="open the Discord server")
     ap.add_argument("--upgrade", action="store_true", help="upgrade ani-down from GitHub")
     ap.add_argument("-v", "--version", action="version", version=f"ani-down {__version__}")
     ap.add_argument("-h", "-help", "--help", action="help", help="show this help and exit")
@@ -191,6 +193,13 @@ def _run():
     a = build_parser().parse_args()
     global DEBUG
     DEBUG = a.debug
+    if a.discord:
+        console.print(f"Join the Discord: [bold cyan]{DISCORD}[/]")
+        try:
+            webbrowser.open(DISCORD)
+        except Exception:
+            pass
+        return
     if a.upgrade:
         return upgrade()
     if not shutil.which("ffmpeg"):
