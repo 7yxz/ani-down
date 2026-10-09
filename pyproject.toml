@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ani-down"
+version = "0.1.0"
+description = "Download anime episodes from your terminal"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+  "requests>=2.25",
+  "rich>=13",
+  "curl_cffi>=0.7; python_version >= '3.9'",
+]
+
+[project.scripts]
+ani-down = "ani_down.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ani_down*"]
