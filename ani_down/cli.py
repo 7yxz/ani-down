@@ -28,6 +28,26 @@ from .utils import hint_install
 
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 COMMON = ["-allowed_extensions", "ALL", "-protocol_whitelist", "file,http,https,tcp,tls,crypto"]
+_extra = None
+
+
+def common():
+    """Input flags for HLS. New ffmpeg (7.1+) refuses segments like seg.ts.jpg unless told otherwise."""
+    global _extra
+    if _extra is None:
+        _extra = []
+        try:
+            r = subprocess.run(["ffmpeg", "-hide_banner", "-h", "demuxer=hls"], capture_output=True,
+                               text=True, timeout=10)
+            text = r.stdout + r.stderr
+            if "extension_picky" in text:
+                _extra += ["-extension_picky", "0"]
+            if "allowed_segment_extensions" in text:
+                _extra += ["-allowed_segment_extensions", "ALL"]
+        except Exception:
+            pass
+    return COMMON + _extra
+
 PROCS, PLOCK, SLOCK = set(), threading.Lock(), threading.Lock()
 DEBUG = False
 
@@ -121,7 +141,7 @@ def _hdr(h):
 def probe(url, hdrs):
     try:
         r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of",
-                            "default=nw=1:nk=1", "-user_agent", UA, "-headers", _hdr(hdrs), *COMMON, url],
+                            "default=nw=1:nk=1", "-user_agent", UA, "-headers", _hdr(hdrs), *common(), url],
                            capture_output=True, text=True, timeout=25)
         return float(r.stdout.strip())
     except Exception:
@@ -136,7 +156,7 @@ def ffmpeg_dl(url, hdrs, sub, out, fmt, progress, task):
     last = "ffmpeg failed"
     for use_sub in ([True, False] if sub else [False]):
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-user_agent", UA,
-               "-headers", _hdr(hdrs), *COMMON, "-i", url]
+               "-headers", _hdr(hdrs), *common(), "-i", url]
         if use_sub:
             cmd += ["-user_agent", UA, "-headers", _hdr(hdrs), "-i", sub]
         cmd += ["-map", "0:v:0", "-map", "0:a:0?"] + (["-map", "1:0"] if use_sub else []) + ["-c", "copy"]
