@@ -2,6 +2,7 @@
 import argparse
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,7 @@ from rich import box
 from rich.panel import Panel
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn, TimeRemainingColumn
 from rich.table import Table
+from rich.text import Text
 
 from . import __version__
 from .core import clean_title, ep_num, get_stream, search_providers
@@ -27,17 +29,26 @@ from .utils import hint_install
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 COMMON = ["-allowed_extensions", "ALL", "-protocol_whitelist", "file,http,https,tcp,tls,crypto"]
 PROCS, PLOCK, SLOCK = set(), threading.Lock(), threading.Lock()
+DEBUG = False
+
+
+class DownloadError(RuntimeError):
+    def __init__(self, msg, detail=""):
+        super().__init__(msg)
+        self.detail = detail
+
 
 
 def build_parser():
     ap = argparse.ArgumentParser(
         prog="ani-down", add_help=False, description="Download anime episodes from your terminal.",
-        epilog="examples:\n  ani-down naruto\n  ani-down naruto -e 1-12 -j 3\n"
+        epilog="examples:\n  ani-down naruto\n  ani-down naruto -e 1-12 -j 3\n  ani-down naruto -e 5 -n 4        (episodes 5 to 8)\n"
                "  ani-down naruto -e latest -f mp4 -q 720 -o ~/anime\n  ani-down naruto -e all --dry-run",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("query", nargs="*", help="search query")
     ap.add_argument("-p", "--provider", choices=PROVIDERS, default="hianime")
     ap.add_argument("-e", "--episodes", help="all, latest, 5, 1-5, 3-, 1,4,7-9 (asks if left out)")
+    ap.add_argument("-n", "--next", type=int, metavar="N", help="download N episodes in a row, starting at the first chosen one")
     ap.add_argument("-q", "--quality", type=int, default=1080, help="preferred quality")
     ap.add_argument("-d", "--dub", action="store_true", default=False, help="dubbed audio")
     ap.add_argument("--sub", dest="dub", action="store_false", help="subbed audio")
@@ -47,6 +58,7 @@ def build_parser():
     ap.add_argument("--retries", type=int, default=2, help="retries per episode")
     ap.add_argument("--overwrite", action="store_true", help="redo files that already exist")
     ap.add_argument("--no-subs", action="store_true", help="do not add subtitles")
+    ap.add_argument("--debug", action="store_true", help="show ffmpeg commands and full errors")
     ap.add_argument("--dry-run", action="store_true", help="only list what would be downloaded")
     ap.add_argument("--upgrade", action="store_true", help="upgrade ani-down from GitHub")
     ap.add_argument("-v", "--version", action="version", version=f"ani-down {__version__}")
@@ -126,11 +138,13 @@ def ffmpeg_dl(url, hdrs, sub, out, fmt, progress, task):
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-user_agent", UA,
                "-headers", _hdr(hdrs), *COMMON, "-i", url]
         if use_sub:
-            cmd += ["-user_agent", UA, "-i", sub]
+            cmd += ["-user_agent", UA, "-headers", _hdr(hdrs), "-i", sub]
         cmd += ["-map", "0:v:0", "-map", "0:a:0?"] + (["-map", "1:0"] if use_sub else []) + ["-c", "copy"]
         if use_sub:
             cmd += ["-c:s", "mov_text" if fmt == "mp4" else "srt"]
         cmd += ["-f", "matroska" if fmt == "mkv" else "mp4", "-progress", "pipe:1", "-nostats", str(tmp)]
+        if DEBUG:
+            console.print(Text("$ " + " ".join(shlex.quote(c) for c in cmd), style="dim"))
         err = tempfile.TemporaryFile()
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err, text=True)
         with PLOCK:
@@ -146,14 +160,17 @@ def ffmpeg_dl(url, hdrs, sub, out, fmt, progress, task):
             tmp.replace(out)
             return
         err.seek(0)
-        tail = err.read().decode(errors="replace").strip().splitlines()
+        tail = err.read().decode(errors="replace").strip().splitlines()[-12:]
         last = tail[-1] if tail else f"ffmpeg exited with {rc}"
+        detail = "ffmpeg command:\n" + " ".join(shlex.quote(c) for c in cmd) + "\n\nffmpeg said:\n" + "\n".join(tail)
     tmp.unlink(missing_ok=True)
-    raise RuntimeError(last)
+    raise DownloadError(last, detail)
 
 
 def _run():
     a = build_parser().parse_args()
+    global DEBUG
+    DEBUG = a.debug
     if a.upgrade:
         return upgrade()
     if not shutil.which("ffmpeg"):
@@ -178,6 +195,8 @@ def _run():
     if not idx:
         error("no matching episodes")
         sys.exit(1)
+    if a.next and a.next > 0:
+        idx = list(range(idx[0], min(idx[0] + a.next, len(eps))))
 
     name = safe(clean_title(title))
     base = Path(a.output).expanduser() / name
@@ -200,26 +219,28 @@ def _run():
         task = prog.add_task(f"[cyan]{tag}[/] waiting", total=None)
         if out.exists() and not a.overwrite:
             prog.update(task, description=f"[yellow]{tag} skipped (exists)[/]", total=1, completed=1)
-            return ("skipped", label, "")
-        last = ""
+            return ("skipped", label, "", "")
+        last = detail = ""
         for attempt in range(a.retries + 1):
             try:
                 prog.update(task, description=f"[cyan]{tag}[/] getting stream")
                 with SLOCK:  # provider sessions are shared, resolve one at a time
                     got, _, errs = get_stream(prov, prov_name, aid, epid, label, title, ns, quiet=True)
                 if not got:
-                    raise RuntimeError("; ".join(f"{n}: {m}" for n, m in errs)[:160])
+                    raise DownloadError("no provider could give a stream",
+                                        "\n".join(f"{n}: {m}" for n, m in errs))
                 url, hdrs, sub = got
                 prog.update(task, description=f"[cyan]{tag}[/] downloading" + (f" (try {attempt + 1})" if attempt else ""))
                 ffmpeg_dl(url, hdrs, None if a.no_subs else sub, out, a.format, prog, task)
                 done = prog.tasks[task].total or prog.tasks[task].completed or 1
                 prog.update(task, description=f"[green]{tag} done[/]", total=done, completed=done)
-                return ("done", label, "")
+                return ("done", label, "", "")
             except (Exception, SystemExit) as e:
                 last = str(e.code if isinstance(e, SystemExit) else e)[:160]
+                detail = getattr(e, "detail", "") or last
                 time.sleep(2)
         prog.update(task, description=f"[red]{tag} failed[/]")
-        return ("failed", label, last)
+        return ("failed", label, last, detail)
 
     cols = (SpinnerColumn(), TextColumn("{task.description}", table_column=None), BarColumn(),
             TaskProgressColumn(), TimeRemainingColumn())
@@ -242,11 +263,16 @@ def _run():
     s.add_column("result")
     s.add_column("note")
     colors = {"done": "green", "skipped": "yellow", "failed": "red"}
-    for st, label, note in results_:
+    for st, label, note, _ in results_:
         s.add_row(label, f"[{colors[st]}]{st}[/]", f"[dim]{note}[/]")
     console.print(s)
     console.print(f"saved in [bold]{base}[/]")
-    if any(r[0] == "failed" for r in results_):
+    failed = [r for r in results_ if r[0] == "failed"]
+    if failed:
+        console.print(Panel(Text(failed[0][3][:1500] or failed[0][2]), title=f"why {failed[0][1]} failed",
+                            title_align="left", border_style="red", box=box.ROUNDED))
+        if not DEBUG:
+            console.print("[dim]run again with --debug to see every ffmpeg command[/]")
         sys.exit(1)
 
 

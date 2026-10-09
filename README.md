@@ -19,6 +19,7 @@ The script installs python, pipx, ffmpeg and fzf with pacman, apt or brew, then 
 ```
 ani-down naruto                       # pick the anime, then mark episodes (tab to mark, ctrl-a for all)
 ani-down naruto -e 1-12 -j 3          # episodes 1 to 12, three at a time
+ani-down naruto -e 5 -n 4              # episode 5 and the next 3
 ani-down naruto -e 1,5,9- -f mp4 -q 720 -o ~/anime
 ani-down naruto -e all --dry-run      # show what would be saved
 ```
@@ -27,6 +28,7 @@ ani-down naruto -e all --dry-run      # show what would be saved
 |------|---------|
 | `-p, --provider` | animepahe or hianime (default hianime), falls back to the other |
 | `-e, --episodes` | `all`, `latest`, `5`, `1-5`, `3-`, `1,4,7-9` (asks if left out) |
+| `-n, --next` | download N episodes in a row, starting at `-e` (or the one you pick) |
 | `-q, --quality` | preferred quality, default 1080 |
 | `-d, --dub` / `--sub` | audio language |
 | `-o, --output` | output folder, default `~/Videos/anime` |
